@@ -1,0 +1,321 @@
+#!/usr/bin/perl
+#
+# New imgconvert! Now in Perl, and based on Imlib2
+# Get Imlib2::Perl @ http://freshmeat.net/projects/imlib2perl/
+#
+# this is a modified version of the below-mentioned hacked up version,
+# written by Russ Burdick, grub@extrapolation.net. it fixes treatment of
+# 'portrait' images (only 'landscape' used to work properly), added a
+# slideshow type function, fixed filesize confusion (ie: sometimes files
+# would end up with the same name although they had different sizes),
+# other cleanup.
+#
+# This is a hacked up compatibility version at the request of Trae McCombs
+# (http://occy.net/). The changes makes it so I don't have to convert my 
+# image viewing stuff either. (Garrett)
+#
+# Copyright (c) 1999 - 2002 Garrett LeSage (http://linuxart.com/)
+# Copyright (c) 2003 - 2004 Russ Burdick, grub@extrapolation.net
+# This script is freely distributable, modifyable, yadda-yadda under the
+# artistic license. http://www.perl.com/language/misc/Artistic.html
+
+use File::Basename;
+use File::Copy;
+use Imlib2;
+
+# Widths requested; first is thumb size, second is default click size.
+# These are later sorted for the resolution list display. all listed 
+# sizes as well as original size will be available.
+@imgsizes = ( 100, 640, 800, 1024 );
+
+# Default extension
+$ext = ".jpg";
+
+# Wrap at this number (number of images across on webpage)
+$numwrap = "4";
+
+# Site Title
+$stitle = "grub.dyndns.org";
+#$stitle = "";
+
+# Default page title prefix
+$ptitle = "My pictures: ";
+
+# Default page title 
+$title = "";
+
+# Loop per image, and scale each to the respective imgsizes
+
+$path = ".";
+opendir DIR, $path;
+@dlist = readdir DIR;
+@flist = grep { !-d "$path/$_" } @dlist;    #no directories
+@clist = grep { !-T "$path/$_" } @flist;    #no text files, only binaries
+@blist = sort @clist;    #sort
+closedir DIR;
+
+# Extract the files that mach the extension only
+@imglist = grep { ".*$ext\$" } @blist;
+
+# Change title to dir name if title is not set
+if ( $title eq "" ) {
+   $title = ( split "/", `pwd` )[-1];
+}
+
+# Page header
+$phead = '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">'
+   . "<html><head><title>$stitle - $ptitle$title</title>\n" 
+   . '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">'
+   . "<style type=\"text/css\">\n"
+   . "body{background-color:#fff;color:#000;}\n"
+   . "a{color:#55a}\n"
+   . "a:visited{color:#bbe}\n"
+   . "a:hover{color:#f00}\n"
+   . "td{font-size:small;text-align:center;font-family:sans-serif;}\n"
+   . "</style>\n" . "</head><body>\n";
+$phead .= "<h1 align=\"center\">$ptitle$title</h1>";
+$phead3 .= "<p></p>";
+
+# Page footer
+$pfoot = "</body></html>";
+
+for ($i = 0; $i <= $#imglist; $i++) {
+
+   $imagename = $imglist[$i];
+
+   # Load the image and then set the working context to the loaded image
+   $image = Imlib2::load_image($imagename);
+   Imlib2::set_context($image);
+
+   # Grab the image's width and height info
+   $width  = Imlib2::get_width();
+   $height = Imlib2::get_height();
+
+   $basename = basename( $imagename, $ext );
+   push ( @bnamelist, $basename );
+
+   # Debugging info
+   print "\n$basename: ${width}x${height} \n";
+
+   if ($i == 0) {
+      $phead2 .= qq(<p align="center">\n);
+      $phead2 .= qq(<a href="$path/show-thumb/$basename.html">slideshow with tiny images</a><br>\n);
+      $phead2 .= qq(<a href="$path/show-640/$basename.html">slideshow with small images</a><br>\n);
+      $phead2 .= qq(<a href="$path/show-800/$basename.html">slideshow with medium images</a><br>\n);
+      $phead2 .= qq(<a href="$path/show-1024/$basename.html">slideshow with large image</a><br>\n);
+      $phead2 .= qq(<a href="$path/show-orig/$basename.html">slideshow with full-size images</a>\n);
+      $phead2 .= qq(</p>\n);
+   }
+
+   foreach $size (@imgsizes) {
+
+      if ($size == $imgsizes[0]) {
+         $revisedsize="thumb";
+      } else {
+         $revisedsize=$size;
+      }
+
+      if ( !-e "$path/$revisedsize/" ) {
+         mkdir("$path/$revisedsize/");
+      }
+
+      if ( !-e "$path/$revisedsize/$basename.$revisedsize$ext" ) {
+
+         # Ensure that we're basing the stuff from the original image
+         Imlib2::set_context($image);
+
+         # Set the width to that which is requested, and the height 
+         # is a respective ratio
+         if ($width > $height) {
+            $width2  = $size;
+            $height2 = $height / $width * $width2;
+         } else {
+            $height2  = $size;
+            $width2 = $width / $height * $height2;
+         }
+
+         # Debugging info
+         $iwidth2 = int($width2);
+         $iheight2 = int($height2);
+         print "${iwidth2}x${iheight2} ";
+
+         # The actual rescaling Imlib2 call
+         $foo = Imlib2::create_cropped_scaled_image( 0, 0,
+                                                    $width, $height,
+                                                    $width2, $height2 );
+
+         # Change context to the result, and save it.
+         Imlib2::set_context($foo);
+         Imlib2::save_image("$path/$revisedsize/$basename.$revisedsize$ext");
+         Imlib2::free_image();
+
+      } else {
+         print "$size -- ";
+         print "Exists! Skipped.\n";
+      }
+
+      if ( !-e "$path/show-$revisedsize/" ) {
+         mkdir("$path/show-$revisedsize/");
+      }
+
+      if ( !-e "$path/show-$revisedsize/$basename.html" ) {
+
+         open(SHOWFILE, ">$path/show-$revisedsize/$basename.html" );
+         print SHOWFILE $phead;
+         print SHOWFILE qq(<p align="center">\n);
+         print SHOWFILE qq{(};
+         print SHOWFILE $i + 1;
+         print SHOWFILE qq{ of };
+         print SHOWFILE $#imglist + 1;
+         print SHOWFILE qq{) $basename<br>\n};
+         if ($i > 0) {
+            $prevname = $bnamelist[$i-1];
+            print SHOWFILE qq(<a href="$prevname.html">&lt;-- previous</a> \n);
+         } else {
+            print SHOWFILE qq(&lt;-- previous \n);
+         }
+         print SHOWFILE qq(<a href="../index.html">index</a> \n);
+         if ($i < $#imglist) {
+            $nextname = basename( $imglist[$i+1], $ext );
+            print SHOWFILE qq(<a href="$nextname.html">next --&gt;</a>\n);
+         } else {
+            print SHOWFILE qq(next --&gt; \n);
+         }
+         print SHOWFILE qq(</p>\n);
+         if ($i < $#imglist) {
+            $nextname = basename( $imglist[$i+1], $ext );
+            print SHOWFILE qq(<p align="center"><a href="$nextname.html"><img src="../$revisedsize/$basename.$revisedsize$ext" alt="$basename" border="0"></a></p>\n);
+         } else {
+            print SHOWFILE qq(<p align="center"><a href="../index.html"><img src="../$revisedsize/$basename.$revisedsize$ext" alt="$basename" border="0"></a></p>\n);
+         }
+         print SHOWFILE $pfoot;
+
+         close(SHOWFILE);
+
+      } else {
+         print "$size.html -- ";
+         print "Exists! Skipped.\n";
+      }
+
+   }
+
+   if ( !-e "$path/orig/" ) {
+      mkdir("$path/orig/");
+   }
+   symlink("../$imagename","$path/orig/$basename.orig$ext");
+
+   Imlib2::set_context($image);
+   Imlib2::free_image();
+
+   push ( @HTML, qq(<a href="$path/$imgsizes[1]/$basename.$imgsizes[1]$ext"><img src="$path/thumb/$basename.thumb$ext" alt="$basename"></a>));
+
+   if ( !-e "$path/show-orig/" ) {
+      mkdir("$path/show-orig/");
+   }
+
+   if ( !-e "$path/show-orig/$basename.html" ) {
+
+      open(SHOWFILE, ">$path/show-orig/$basename.html" );
+      print SHOWFILE $phead;
+      print SHOWFILE qq(<p align="center">\n);
+      print SHOWFILE qq{(};
+      print SHOWFILE $i + 1;
+      print SHOWFILE qq{ of };
+      print SHOWFILE $#imglist + 1;
+      print SHOWFILE qq{) $basename<br>\n};
+      if ($i > 0) {
+         $prevname = $bnamelist[$i-1];
+         print SHOWFILE qq(<a href="$prevname.html">&lt;-- previous</a> \n);
+      } else {
+         print SHOWFILE qq(<a href="../index.html">&lt;-- index</a> \n);
+      }
+      if ($i < $#imglist) {
+         $nextname = basename( $imglist[$i+1], $ext );
+         print SHOWFILE qq(<a href="$nextname.html">next --&gt;</a>\n);
+      } else {
+         print SHOWFILE qq(<a href="../index.html">index --&gt;</a> \n);
+      }
+      print SHOWFILE qq(</p>\n);
+      print SHOWFILE qq(<p align="center"><a href="../orig/$basename.orig$ext"><img src="../orig/$basename.orig$ext" alt="$basename" border="0"></a></p>\n);
+      print SHOWFILE $pfoot;
+
+      close(SHOWFILE);
+
+   } else {
+      print "orig.html -- ";
+      print "Exists! Skipped.\n";
+   }
+
+}
+
+$i = 0;
+foreach $htmlsnip ( @HTML ) {
+
+   $curpic = $bnamelist[ $i ];
+   $i++;
+
+   if ( $i % $numwrap == 1 ) {
+      $linestart = '<div align="center"><table cellpadding="5"><tr>' . "\n";
+      if ( $i > 1 ) {
+         $linestop = '</tr></table></div>' . "\n";
+      }
+   } else {
+      $linestart = '';
+      $linestop  = '';
+   }
+
+   # Start the sizelist with a clean slade
+   @sizelist = "";
+
+   # Sort by number, and return the available sizes as links
+   foreach $mysize ( sort { $a <=> $b } @imgsizes ) {
+      if ( $mysize != @imgsizes[0] ) {
+         $imagename = "$mysize/$curpic.$mysize$ext";
+         @picstat = stat($imagename);
+         $fsize   = int( @picstat[7] / 1024 ) . "k";
+
+         # Load the image and then set the working context to the loaded image
+         $image = Imlib2::load_image($imagename);
+         Imlib2::set_context($image);
+
+         # Grab the image's width and height info
+         $width  = Imlib2::get_width();
+         $height = Imlib2::get_height();
+
+         Imlib2::free_image();
+
+         push ( @sizelist, qq(<a href="$mysize/$curpic.$mysize$ext">${width}x${height}</a>&nbsp;($fsize)));
+      }
+   }
+
+   # Don't forget the original size! (a special case)
+   @picstat = stat("$curpic$ext");
+   $fsize   = int( @picstat[7] / 1024 ) . "k";
+
+   # Load the image and then set the working context to the loaded image
+   $image = Imlib2::load_image("$curpic$ext");
+   Imlib2::set_context($image);
+
+   # Grab the image's width and height info
+   $width  = Imlib2::get_width();
+   $height = Imlib2::get_height();
+
+   Imlib2::free_image();
+
+   push ( @sizelist, qq(<a href="orig/$curpic.orig$ext">${width}x${height}</a>&nbsp;($fsize)));
+
+   # Format the HTML snip
+   $htmlsnip =
+      "<strong>$i</strong>:&nbsp;$curpic<br>" . $htmlsnip
+      . join ( "<br>", @sizelist );
+
+   $page .= "$linestop$linestart<td>$htmlsnip</td>\n";
+
+}
+$page .= "</tr></table></div>\n\n";
+
+open( OUTFILE, ">index.html" );
+print OUTFILE $phead . $phead2 . $phead3 . $page . $pfoot;
+close(OUTFILE);
+
+print "\nDone!\n\n";
