@@ -1,8 +1,8 @@
 #!/usr/bin/perl
-#
+
 # New imgconvert! Now in Perl, and based on Imlib2
-# Get Imlib2::Perl @ http://freshmeat.net/projects/imlib2perl/
-#
+# Get Image::Imlib2 from your favorite CPAN mirror
+
 # this is a modified version of the below-mentioned hacked up version,
 # written by Russ Burdick, grub@extrapolation.net. it fixes treatment of
 # 'portrait' images (only 'landscape' used to work properly), added a
@@ -13,25 +13,26 @@
 # This is a hacked up compatibility version at the request of Trae McCombs
 # (http://occy.net/). The changes makes it so I don't have to convert my 
 # image viewing stuff either. (Garrett)
-#
+
 # Copyright (c) 1999 - 2002 Garrett LeSage (http://linuxart.com/)
-# Copyright (c) 2003 - 2004 Russ Burdick, grub@extrapolation.net
+# Copyright (c) 2003 - 2015 Russ Burdick, grub@extrapolation.net
 # This script is freely distributable, modifyable, yadda-yadda under the
 # artistic license. http://www.perl.com/language/misc/Artistic.html
 
 use File::Basename;
 use File::Copy;
-use Imlib2;
+use Image::Imlib2;
+use Image::EXIF;
 
 # Widths requested; first is thumb size, second is default click size.
-# These are later sorted for the resolution list display. all listed 
-# sizes as well as original size will be available.
-@imgsizes = ( 100, 640, 800, 1024 );
+# These are later sorted for the resolution list display
+@imgsizes = ( 200, 640, 800, 1024 );
 
 # Default extension
 $ext = ".jpg";
+@exts = (".jpg", ".png", ".gif");
 
-# Wrap at this number (number of images across on webpage)
+# Wrap at this number
 $numwrap = "4";
 
 # Site Title
@@ -55,7 +56,7 @@ opendir DIR, $path;
 closedir DIR;
 
 # Extract the files that mach the extension only
-@imglist = grep { ".*$ext\$" } @blist;
+@imglist = grep { /$ext$/ } @blist;
 
 # Change title to dir name if title is not set
 if ( $title eq "" ) {
@@ -83,19 +84,39 @@ for ($i = 0; $i <= $#imglist; $i++) {
 
    $imagename = $imglist[$i];
 
+   # images from camera phones these days tend to have an orientation listed,
+   # despite always appearing the same. use the exif info to detect this and
+   # rotate them accordingly on output. note: this strips off the exif tag so
+   # they "just work" from now on.
+   my $ori = 0;
+   my $rot = 0;
+   my $exif = new Image::EXIF($imagename);
+   if(!$exif->error){
+      my $imageinfo = $exif->get_image_info();
+      $ori = $imageinfo->{'Image Orientation'};
+      if($ori =~ /^.*top.*left/i) {
+         $rot = 0;
+      } elsif ($ori =~ /^.*right.*top/i) {
+         $rot = 1;
+      } elsif ($ori =~ /^.*bottem.*right/i) {
+         $rot = 2;
+      } elsif ($ori =~ /^.*left.*bottom/i) {
+         $rot = 3;
+      }
+   }
+
    # Load the image and then set the working context to the loaded image
-   $image = Imlib2::load_image($imagename);
-   Imlib2::set_context($image);
+   $image = Image::Imlib2->load($imagename);
 
    # Grab the image's width and height info
-   $width  = Imlib2::get_width();
-   $height = Imlib2::get_height();
+   $width  = $image->get_width();
+   $height = $image->get_height();
 
    $basename = basename( $imagename, $ext );
    push ( @bnamelist, $basename );
 
    # Debugging info
-   print "\n$basename: ${width}x${height} \n";
+   print "\n$imagename: ${width}x${height} \n";
 
    if ($i == 0) {
       $phead2 .= qq(<p align="center">\n);
@@ -121,9 +142,6 @@ for ($i = 0; $i <= $#imglist; $i++) {
 
       if ( !-e "$path/$revisedsize/$basename.$revisedsize$ext" ) {
 
-         # Ensure that we're basing the stuff from the original image
-         Imlib2::set_context($image);
-
          # Set the width to that which is requested, and the height 
          # is a respective ratio
          if ($width > $height) {
@@ -140,14 +158,14 @@ for ($i = 0; $i <= $#imglist; $i++) {
          print "${iwidth2}x${iheight2} ";
 
          # The actual rescaling Imlib2 call
-         $foo = Imlib2::create_cropped_scaled_image( 0, 0,
-                                                    $width, $height,
-                                                    $width2, $height2 );
+         $foo = $image->create_scaled_image($width2, $height2);
+
+         if ($rot > 0) {
+            $foo->image_orientate($rot);
+         }
 
          # Change context to the result, and save it.
-         Imlib2::set_context($foo);
-         Imlib2::save_image("$path/$revisedsize/$basename.$revisedsize$ext");
-         Imlib2::free_image();
+         $foo->save("$path/$revisedsize/$basename.$revisedsize$ext");
 
       } else {
          print "$size -- ";
@@ -198,14 +216,12 @@ for ($i = 0; $i <= $#imglist; $i++) {
       }
 
    }
+   print "\n";
 
    if ( !-e "$path/orig/" ) {
       mkdir("$path/orig/");
    }
    symlink("../$imagename","$path/orig/$basename.orig$ext");
-
-   Imlib2::set_context($image);
-   Imlib2::free_image();
 
    push ( @HTML, qq(<a href="$path/$imgsizes[1]/$basename.$imgsizes[1]$ext"><img src="$path/thumb/$basename.thumb$ext" alt="$basename"></a>));
 
@@ -275,14 +291,11 @@ foreach $htmlsnip ( @HTML ) {
          $fsize   = int( @picstat[7] / 1024 ) . "k";
 
          # Load the image and then set the working context to the loaded image
-         $image = Imlib2::load_image($imagename);
-         Imlib2::set_context($image);
+         $image = Image::Imlib2->load($imagename);
 
          # Grab the image's width and height info
-         $width  = Imlib2::get_width();
-         $height = Imlib2::get_height();
-
-         Imlib2::free_image();
+         $width  = $image->get_width();
+         $height = $image->get_height();
 
          push ( @sizelist, qq(<a href="$mysize/$curpic.$mysize$ext">${width}x${height}</a>&nbsp;($fsize)));
       }
@@ -293,14 +306,11 @@ foreach $htmlsnip ( @HTML ) {
    $fsize   = int( @picstat[7] / 1024 ) . "k";
 
    # Load the image and then set the working context to the loaded image
-   $image = Imlib2::load_image("$curpic$ext");
-   Imlib2::set_context($image);
+   $image = Image::Imlib2->load("$curpic$ext");
 
    # Grab the image's width and height info
-   $width  = Imlib2::get_width();
-   $height = Imlib2::get_height();
-
-   Imlib2::free_image();
+   $width  = $image->get_width();
+   $height = $image->get_height();
 
    push ( @sizelist, qq(<a href="orig/$curpic.orig$ext">${width}x${height}</a>&nbsp;($fsize)));
 
