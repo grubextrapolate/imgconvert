@@ -223,7 +223,9 @@ for ($i = 0; $i <= $#imglist; $i++) {
    }
    symlink("../$imagename","$path/orig/$basename.orig$ext");
 
-   push ( @HTML, qq(<a href="$path/$imgsizes[1]/$basename.$imgsizes[1]$ext"><img src="$path/thumb/$basename.thumb$ext" alt="$basename"></a>));
+   # link to the image within slideshow so we have next/prev links. use 640
+   # image as default ($imgsizes[1]) when clicking on thumbnail image.
+   push ( @HTML, qq(<a href="$path/show-$imgsizes[1]/$basename.html"><img src="$path/thumb/$basename.thumb$ext" alt="$basename"></a>));
 
    if ( !-e "$path/show-orig/" ) {
       mkdir("$path/show-orig/");
@@ -297,7 +299,8 @@ foreach $htmlsnip ( @HTML ) {
          $width  = $image->get_width();
          $height = $image->get_height();
 
-         push ( @sizelist, qq(<a href="$mysize/$curpic.$mysize$ext">${width}x${height}</a>&nbsp;($fsize)));
+         # link to slideshow for all but orig size.
+         push ( @sizelist, qq(<a href="show-$mysize/$curpic.html">${width}x${height}</a>&nbsp;($fsize)));
       }
    }
 
@@ -312,6 +315,8 @@ foreach $htmlsnip ( @HTML ) {
    $width  = $image->get_width();
    $height = $image->get_height();
 
+   # don't link to the slideshow for the orig (since it's generally huge and
+   # we'll only really want it for downloading purposes).
    push ( @sizelist, qq(<a href="orig/$curpic.orig$ext">${width}x${height}</a>&nbsp;($fsize)));
 
    # Format the HTML snip
